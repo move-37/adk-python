@@ -209,7 +209,7 @@ def streaming_event_to_llm_response(
     delta = event.delta
 
     # Text delta
-    if hasattr(delta, "type") and delta.type == "text_delta":
+    if delta.type == "text_delta":
       return LlmResponse(
           content=types.Content(
               role="model",
@@ -219,7 +219,7 @@ def streaming_event_to_llm_response(
       )
 
     # Thinking delta
-    if hasattr(delta, "type") and delta.type == "thinking_delta":
+    elif delta.type == "thinking_delta":
       return LlmResponse(
           content=types.Content(
               role="model",
@@ -231,14 +231,13 @@ def streaming_event_to_llm_response(
   # Handle message deltas (usage updates)
   elif event.type == "message_delta":
     if hasattr(event, "usage"):
+      input_tokens = getattr(event.usage, "input_tokens", 0)
+      output_tokens = getattr(event.usage, "output_tokens", 0)
       return LlmResponse(
           usage_metadata=types.GenerateContentResponseUsageMetadata(
-              prompt_token_count=getattr(event.usage, "input_tokens", 0),
-              candidates_token_count=getattr(event.usage, "output_tokens", 0),
-              total_token_count=(
-                  getattr(event.usage, "input_tokens", 0)
-                  + getattr(event.usage, "output_tokens", 0)
-              ),
+              prompt_token_count=input_tokens,
+              candidates_token_count=output_tokens,
+              total_token_count=input_tokens + output_tokens,
           ),
       )
 
@@ -365,7 +364,7 @@ class Claude(BaseLlm):
     thinking = NOT_GIVEN
     if llm_request.config and llm_request.config.thinking_config:
       budget = llm_request.config.thinking_config.thinking_budget
-      if budget and budget != 0:
+      if budget:
         if budget == -1:
           # Automatic thinking budget - use recommended default of 10000 tokens
           thinking = {"type": "enabled", "budget_tokens": 10000}
@@ -455,15 +454,14 @@ class Claude(BaseLlm):
 
         # Only yield final aggregated response if we have content
         if parts:
+          input_tokens = final_message.usage.input_tokens
+          output_tokens = final_message.usage.output_tokens
           yield LlmResponse(
               content=types.Content(role="model", parts=parts),
               usage_metadata=types.GenerateContentResponseUsageMetadata(
-                  prompt_token_count=final_message.usage.input_tokens,
-                  candidates_token_count=final_message.usage.output_tokens,
-                  total_token_count=(
-                      final_message.usage.input_tokens
-                      + final_message.usage.output_tokens
-                  ),
+                  prompt_token_count=input_tokens,
+                  candidates_token_count=output_tokens,
+                  total_token_count=input_tokens + output_tokens,
               ),
           )
 
