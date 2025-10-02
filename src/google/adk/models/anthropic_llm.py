@@ -352,12 +352,12 @@ class Claude(BaseLlm):
   Attributes:
     model: The name of the Claude model.
     max_tokens: The maximum number of tokens to generate.
-    enable_interleaved_thinking: Enable interleaved thinking for tool use (beta).
+    extra_headers: Optional extra headers to pass to the Anthropic API.
   """
 
   model: str = "claude-3-5-sonnet-v2@20241022"
   max_tokens: int = 8192
-  enable_interleaved_thinking: bool = False
+  extra_headers: Optional[dict[str, str]] = None
 
   @classmethod
   @override
@@ -409,12 +409,8 @@ class Claude(BaseLlm):
     else:
       logger.warning(f"No thinking_config found in llm_request.config")
 
-    # Configure beta header for interleaved thinking
-    extra_headers = (
-        {"anthropic-beta": "interleaved-thinking-2025-05-14"}
-        if self.enable_interleaved_thinking and thinking != NOT_GIVEN
-        else NOT_GIVEN
-    )
+    # Use extra headers if provided
+    extra_headers = self.extra_headers or NOT_GIVEN
 
     if stream:
       # Use streaming mode

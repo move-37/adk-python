@@ -310,12 +310,12 @@ async def test_interleaved_thinking_disabled_by_default(
 
 @pytest.mark.asyncio
 async def test_interleaved_thinking_streaming(base_llm_request):
-  """Test that beta header is sent in streaming mode when enabled."""
-  # Create Claude with interleaved thinking enabled
+  """Test that beta header is sent in streaming mode when provided."""
+  # Create Claude with beta headers
   claude_llm = Claude(
       model="claude-opus-4-1@20250805",
       max_tokens=4096,
-      enable_interleaved_thinking=True,
+      extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
   )
 
   base_llm_request.config.thinking_config = types.ThinkingConfig(
@@ -356,12 +356,12 @@ async def test_interleaved_thinking_streaming(base_llm_request):
 
 @pytest.mark.asyncio
 async def test_interleaved_thinking_non_streaming(base_llm_request):
-  """Test that beta header is sent in non-streaming mode when enabled."""
-  # Create Claude with interleaved thinking enabled
+  """Test that beta header is sent in non-streaming mode when provided."""
+  # Create Claude with beta headers
   claude_llm = Claude(
       model="claude-opus-4-1@20250805",
       max_tokens=4096,
-      enable_interleaved_thinking=True,
+      extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
   )
 
   base_llm_request.config.thinking_config = types.ThinkingConfig(
@@ -396,13 +396,13 @@ async def test_interleaved_thinking_non_streaming(base_llm_request):
 
 
 @pytest.mark.asyncio
-async def test_interleaved_thinking_requires_thinking_config(base_llm_request):
-  """Test that beta header is NOT sent when thinking is disabled."""
-  # Create Claude with interleaved thinking enabled
+async def test_extra_headers_sent_regardless_of_thinking(base_llm_request):
+  """Test that extra headers are sent even when thinking is disabled."""
+  # Create Claude with beta headers
   claude_llm = Claude(
       model="claude-opus-4-1@20250805",
       max_tokens=4096,
-      enable_interleaved_thinking=True,
+      extra_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
   )
 
   # No thinking_config set - thinking disabled
@@ -429,10 +429,12 @@ async def test_interleaved_thinking_requires_thinking_config(base_llm_request):
     ):
       responses.append(response)
 
-    # Verify beta header is NOT_GIVEN when thinking is disabled
+    # Verify beta header is sent even when thinking is disabled
     mock_client.messages.create.assert_called_once()
     call_kwargs = mock_client.messages.create.call_args.kwargs
-    assert call_kwargs.get("extra_headers") == NOT_GIVEN
+    assert call_kwargs.get("extra_headers") == {
+        "anthropic-beta": "interleaved-thinking-2025-05-14"
+    }
 
 
 @pytest.mark.asyncio
