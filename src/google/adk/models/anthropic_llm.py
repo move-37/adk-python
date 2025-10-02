@@ -352,10 +352,12 @@ class Claude(BaseLlm):
   Attributes:
     model: The name of the Claude model.
     max_tokens: The maximum number of tokens to generate.
+    enable_interleaved_thinking: Enable interleaved thinking for tool use (beta).
   """
 
   model: str = "claude-3-5-sonnet-v2@20241022"
   max_tokens: int = 8192
+  enable_interleaved_thinking: bool = False
 
   @classmethod
   @override
@@ -407,6 +409,12 @@ class Claude(BaseLlm):
     else:
       logger.warning(f"No thinking_config found in llm_request.config")
 
+    # Configure beta header for interleaved thinking
+    extra_headers = (
+        {"anthropic-beta": "interleaved-thinking-2025-05-14"}
+        if self.enable_interleaved_thinking and thinking != NOT_GIVEN
+        else NOT_GIVEN
+    )
 
     if stream:
       # Use streaming mode
@@ -428,6 +436,7 @@ class Claude(BaseLlm):
           tool_choice=tool_choice,
           max_tokens=self.max_tokens,
           thinking=thinking,
+          extra_headers=extra_headers,
       ) as anthropic_stream:
         # Process streaming events
         async for event in anthropic_stream:
@@ -494,6 +503,7 @@ class Claude(BaseLlm):
           tool_choice=tool_choice,
           max_tokens=self.max_tokens,
           thinking=thinking,
+          extra_headers=extra_headers,
       )
       yield message_to_generate_content_response(message)
 

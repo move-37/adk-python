@@ -272,3 +272,200 @@ async def test_thinking_with_streaming(claude_llm, base_llm_request):
     mock_client.messages.stream.assert_called_once()
     call_kwargs = mock_client.messages.stream.call_args.kwargs
     assert call_kwargs["thinking"] == {"type": "enabled", "budget_tokens": 2048}
+
+
+@pytest.mark.asyncio
+async def test_interleaved_thinking_disabled_by_default(
+    claude_llm, base_llm_request
+):
+  """Test that beta header is NOT sent when interleaved thinking is disabled."""
+  base_llm_request.config.thinking_config = types.ThinkingConfig(
+      include_thoughts=True, thinking_budget=2048
+  )
+
+  with mock.patch.object(claude_llm, "_anthropic_client") as mock_client:
+    mock_client.messages.create = mock.AsyncMock(
+        return_value=anthropic_types.Message(
+            id="test",
+            content=[],
+            model="claude-opus-4-1@20250805",
+            role="assistant",
+            stop_reason="end_turn",
+            type="message",
+            usage=anthropic_types.Usage(input_tokens=10, output_tokens=20),
+        )
+    )
+
+    responses = []
+    async for response in claude_llm.generate_content_async(
+        base_llm_request, stream=False
+    ):
+      responses.append(response)
+
+    # Verify beta header is NOT_GIVEN (default behavior)
+    mock_client.messages.create.assert_called_once()
+    call_kwargs = mock_client.messages.create.call_args.kwargs
+    assert call_kwargs.get("extra_headers") == NOT_GIVEN
+
+
+@pytest.mark.asyncio
+async def test_interleaved_thinking_streaming(base_llm_request):
+  """Test that beta header is sent in streaming mode when enabled."""
+  # Create Claude with interleaved thinking enabled
+  claude_llm = Claude(
+      model="claude-opus-4-1@20250805",
+      max_tokens=4096,
+      enable_interleaved_thinking=True,
+  )
+
+  base_llm_request.config.thinking_config = types.ThinkingConfig(
+      include_thoughts=True, thinking_budget=2048
+  )
+
+  with mock.patch.object(claude_llm, "_anthropic_client") as mock_client:
+    mock_stream = mock.AsyncMock()
+    mock_stream.__aenter__ = mock.AsyncMock(return_value=mock_stream)
+    mock_stream.__aexit__ = mock.AsyncMock()
+    mock_stream.__aiter__ = mock.AsyncMock(return_value=iter([]))
+    mock_stream.get_final_message = mock.AsyncMock(
+        return_value=anthropic_types.Message(
+            id="test",
+            content=[],
+            model="claude-opus-4-1@20250805",
+            role="assistant",
+            stop_reason="end_turn",
+            type="message",
+            usage=anthropic_types.Usage(input_tokens=10, output_tokens=20),
+        )
+    )
+    mock_client.messages.stream = mock.Mock(return_value=mock_stream)
+
+    responses = []
+    async for response in claude_llm.generate_content_async(
+        base_llm_request, stream=True
+    ):
+      responses.append(response)
+
+    # Verify beta header was sent
+    mock_client.messages.stream.assert_called_once()
+    call_kwargs = mock_client.messages.stream.call_args.kwargs
+    assert call_kwargs["extra_headers"] == {
+        "anthropic-beta": "interleaved-thinking-2025-05-14"
+    }
+
+
+@pytest.mark.asyncio
+async def test_interleaved_thinking_non_streaming(base_llm_request):
+  """Test that beta header is sent in non-streaming mode when enabled."""
+  # Create Claude with interleaved thinking enabled
+  claude_llm = Claude(
+      model="claude-opus-4-1@20250805",
+      max_tokens=4096,
+      enable_interleaved_thinking=True,
+  )
+
+  base_llm_request.config.thinking_config = types.ThinkingConfig(
+      include_thoughts=True, thinking_budget=2048
+  )
+
+  with mock.patch.object(claude_llm, "_anthropic_client") as mock_client:
+    mock_client.messages.create = mock.AsyncMock(
+        return_value=anthropic_types.Message(
+            id="test",
+            content=[],
+            model="claude-opus-4-1@20250805",
+            role="assistant",
+            stop_reason="end_turn",
+            type="message",
+            usage=anthropic_types.Usage(input_tokens=10, output_tokens=20),
+        )
+    )
+
+    responses = []
+    async for response in claude_llm.generate_content_async(
+        base_llm_request, stream=False
+    ):
+      responses.append(response)
+
+    # Verify beta header was sent
+    mock_client.messages.create.assert_called_once()
+    call_kwargs = mock_client.messages.create.call_args.kwargs
+    assert call_kwargs["extra_headers"] == {
+        "anthropic-beta": "interleaved-thinking-2025-05-14"
+    }
+
+
+@pytest.mark.asyncio
+async def test_interleaved_thinking_requires_thinking_config(base_llm_request):
+  """Test that beta header is NOT sent when thinking is disabled."""
+  # Create Claude with interleaved thinking enabled
+  claude_llm = Claude(
+      model="claude-opus-4-1@20250805",
+      max_tokens=4096,
+      enable_interleaved_thinking=True,
+  )
+
+  # No thinking_config set - thinking disabled
+  base_llm_request.config.thinking_config = types.ThinkingConfig(
+      include_thoughts=True, thinking_budget=0  # Disabled
+  )
+
+  with mock.patch.object(claude_llm, "_anthropic_client") as mock_client:
+    mock_client.messages.create = mock.AsyncMock(
+        return_value=anthropic_types.Message(
+            id="test",
+            content=[anthropic_types.TextBlock(text="4", type="text")],
+            model="claude-opus-4-1@20250805",
+            role="assistant",
+            stop_reason="end_turn",
+            type="message",
+            usage=anthropic_types.Usage(input_tokens=10, output_tokens=2),
+        )
+    )
+
+    responses = []
+    async for response in claude_llm.generate_content_async(
+        base_llm_request, stream=False
+    ):
+      responses.append(response)
+
+    # Verify beta header is NOT_GIVEN when thinking is disabled
+    mock_client.messages.create.assert_called_once()
+    call_kwargs = mock_client.messages.create.call_args.kwargs
+    assert call_kwargs.get("extra_headers") == NOT_GIVEN
+
+
+@pytest.mark.asyncio
+async def test_thinking_blocks_preserved_in_assistant_messages(base_llm_request):
+  """Test that thinking blocks from previous assistant turn are preserved."""
+  from google.adk.models.anthropic_llm import content_to_message_param
+
+  # Create content with thinking block and tool use
+  content = types.Content(
+      role="model",
+      parts=[
+          types.Part(
+              text="Let me calculate this step by step...", thought=True
+          ),
+          types.Part.from_function_call(
+              name="calculator", args={"expression": "2+2"}
+          ),
+      ],
+  )
+
+  message_param = content_to_message_param(content)
+
+  # Verify message structure
+  assert message_param["role"] == "assistant"
+  assert len(message_param["content"]) == 2
+
+  # Verify thinking block comes FIRST
+  assert message_param["content"][0]["type"] == "thinking"
+  assert (
+      message_param["content"][0]["thinking"]
+      == "Let me calculate this step by step..."
+  )
+
+  # Verify tool use comes after
+  assert message_param["content"][1]["type"] == "tool_use"
+  assert message_param["content"][1]["name"] == "calculator"
