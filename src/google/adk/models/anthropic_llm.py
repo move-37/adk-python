@@ -85,8 +85,20 @@ def part_to_message_block(
     anthropic_types.ImageBlockParam,
     anthropic_types.ToolUseBlockParam,
     anthropic_types.ToolResultBlockParam,
+    dict,  # For thinking blocks
 ]:
-  if part.text:
+  # Handle thinking blocks (must check thought=True BEFORE text)
+  # Thinking is stored as Part(text=..., thought=True, thought_signature=...)
+  if part.text and hasattr(part, 'thought') and part.thought:
+    thinking_block = {"type": "thinking", "thinking": part.text}
+    if hasattr(part, 'thought_signature') and part.thought_signature:
+      # thought_signature is stored as bytes in Part, but API expects base64 string
+      thinking_block["signature"] = base64.b64encode(part.thought_signature).decode('utf-8')
+      logger.debug(f"Including signature with thinking block")
+    else:
+      logger.warning(f"No signature found for thinking block - this may cause API errors")
+    return thinking_block
+  elif part.text:
     return anthropic_types.TextBlockParam(text=part.text, type="text")
   elif part.function_call:
     assert part.function_call.name
@@ -140,14 +152,26 @@ def part_to_message_block(
 def content_to_message_param(
     content: types.Content,
 ) -> anthropic_types.MessageParam:
-  message_block = []
+  thinking_blocks = []
+  other_blocks = []
+
   for part in content.parts or []:
     # Image data is not supported in Claude for model turns.
     if _is_image_part(part):
       logger.warning("Image data is not supported in Claude for model turns.")
       continue
 
-    message_block.append(part_to_message_block(part))
+    block = part_to_message_block(part)
+
+    # Separate thinking blocks from other blocks
+    # Anthropic requires thinking blocks to come FIRST in assistant messages
+    if isinstance(block, dict) and block.get("type") == "thinking":
+      thinking_blocks.append(block)
+    else:
+      other_blocks.append(block)
+
+  # Thinking blocks MUST come first (Anthropic API requirement)
+  message_block = thinking_blocks + other_blocks
 
   return {
       "role": to_claude_role(content.role),
@@ -172,9 +196,10 @@ def content_block_to_part(
   # Thinking blocks have a 'thinking' attribute containing the reasoning text
   if hasattr(content_block, "thinking"):
     thinking_text = content_block.thinking
-    logger.info(f"Received thinking block ({len(thinking_text)} chars)")
-    # Return as Part with thought=True (standard GenAI format)
-    return types.Part(text=thinking_text, thought=True)
+    signature = getattr(content_block, 'signature', None)
+    logger.info(f"Received thinking block ({len(thinking_text)} chars, signature={'present' if signature else 'missing'})")
+    # Return as Part with thought=True and preserve signature (standard GenAI format)
+    return types.Part(text=thinking_text, thought=True, thought_signature=signature)
 
   # Alternative check: some versions may use type attribute
   if (
@@ -182,11 +207,12 @@ def content_block_to_part(
       and getattr(content_block, "type", None) == "thinking"
   ):
     thinking_text = str(content_block)
+    signature = getattr(content_block, 'signature', None)
     logger.info(
-        f"Received thinking block via type check ({len(thinking_text)} chars)"
+        f"Received thinking block via type check ({len(thinking_text)} chars, signature={'present' if signature else 'missing'})"
     )
-    # Return as Part with thought=True (standard GenAI format)
-    return types.Part(text=thinking_text, thought=True)
+    # Return as Part with thought=True and preserve signature (standard GenAI format)
+    return types.Part(text=thinking_text, thought=True, thought_signature=signature)
 
   raise NotImplementedError(
       f"Not supported yet: {type(content_block).__name__}"
@@ -231,8 +257,8 @@ def streaming_event_to_llm_response(
   # Handle message deltas (usage updates)
   elif event.type == "message_delta":
     if hasattr(event, "usage"):
-      input_tokens = getattr(event.usage, "input_tokens", 0)
-      output_tokens = getattr(event.usage, "output_tokens", 0)
+      input_tokens = getattr(event.usage, "input_tokens", 0) or 0
+      output_tokens = getattr(event.usage, "output_tokens", 0) or 0
       return LlmResponse(
           usage_metadata=types.GenerateContentResponseUsageMetadata(
               prompt_token_count=input_tokens,
@@ -362,33 +388,27 @@ class Claude(BaseLlm):
 
     # Extract and convert thinking config from ADK to Anthropic format
     thinking = NOT_GIVEN
+
     if llm_request.config and llm_request.config.thinking_config:
       budget = llm_request.config.thinking_config.thinking_budget
       if budget:
         if budget == -1:
-          # Automatic thinking budget - use recommended default of 10000 tokens
-          thinking = {"type": "enabled", "budget_tokens": 10000}
-          logger.info(
-              "Extended thinking enabled (automatic budget: 10000 tokens)"
+          raise ValueError(
+              "Unlimited thinking budget (-1) is not supported with Claude."
           )
         elif budget > 0:
-          # Specific budget - enforce minimum 1024 tokens
-          actual_budget = max(budget, 1024)
-          thinking = {"type": "enabled", "budget_tokens": actual_budget}
+
+          thinking = {"type": "enabled", "budget_tokens": budget}
           logger.info(
-              f"Extended thinking enabled (budget: {actual_budget} tokens)"
+              f"Extended thinking enabled (budget: {budget} tokens)"
           )
+      else:
+        logger.warning(f"Budget not given! budget={budget}")
+    else:
+      logger.warning(f"No thinking_config found in llm_request.config")
 
-    # Determine if streaming should be used
-    use_streaming = (
-        stream  # From runtime context (streaming_mode == SSE)
-        or thinking
-        != NOT_GIVEN  # Extended thinking requires streaming (Anthropic-specific)
-        or self.max_tokens
-        >= 8192  # Large max_tokens may exceed 10min timeout (Anthropic SDK requirement)
-    )
 
-    if use_streaming:
+    if stream:
       # Use streaming mode
       logger.info(
           f"Using streaming mode (stream={stream}, "
@@ -426,6 +446,8 @@ class Claude(BaseLlm):
 
             # If we have accumulated thinking and now getting text,
             # yield the accumulated thinking first
+            # NOTE: This partial response is for UI display only
+            # The final response with signature will be yielded after the stream ends
             if accumulated_thinking and accumulated_text and not is_thought:
               yield LlmResponse(
                   content=types.Content(
@@ -442,18 +464,14 @@ class Claude(BaseLlm):
             if not is_thought:
               yield llm_response
 
-        # Get final message to extract usage metadata
+        # Get final message with complete content blocks (includes signatures)
         final_message = await anthropic_stream.get_final_message()
 
-        # Build final aggregated response with complete content
-        parts = []
-        if accumulated_thinking:
-          parts.append(types.Part(text=accumulated_thinking, thought=True))
-        if accumulated_text:
-          parts.append(types.Part.from_text(text=accumulated_text))
-
-        # Only yield final aggregated response if we have content
-        if parts:
+        # Build final response from complete content blocks to preserve thinking signatures
+        # IMPORTANT: Use final_message.content instead of accumulated strings
+        # because accumulated strings don't have signatures
+        if final_message.content:
+          parts = [content_block_to_part(cb) for cb in final_message.content]
           input_tokens = final_message.usage.input_tokens
           output_tokens = final_message.usage.output_tokens
           yield LlmResponse(
@@ -466,7 +484,7 @@ class Claude(BaseLlm):
           )
 
     else:
-      # Non-streaming mode (simple requests without thinking)
+      # Non-streaming mode
       logger.info("Using non-streaming mode")
       message = await self._anthropic_client.messages.create(
           model=llm_request.model,
@@ -475,6 +493,7 @@ class Claude(BaseLlm):
           tools=tools,
           tool_choice=tool_choice,
           max_tokens=self.max_tokens,
+          thinking=thinking,
       )
       yield message_to_generate_content_response(message)
 
