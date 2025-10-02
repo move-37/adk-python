@@ -368,7 +368,7 @@ class Claude(BaseLlm):
       if budget and budget != 0:
         if budget == -1:
           # Automatic thinking budget - use recommended default of 10000 tokens
-          thinking = {"type": "enabled", "budget_tokens": 1024}
+          thinking = {"type": "enabled", "budget_tokens": 10000}
           logger.info(
               "Extended thinking enabled (automatic budget: 10000 tokens)"
           )
