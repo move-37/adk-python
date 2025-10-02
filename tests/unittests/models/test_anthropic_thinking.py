@@ -47,7 +47,7 @@ def base_llm_request():
 
 @pytest.mark.asyncio
 async def test_thinking_budget_automatic(claude_llm, base_llm_request):
-  """Test that thinking_budget=-1 uses automatic budget (1024 tokens)."""
+  """Test that thinking_budget=-1 uses automatic budget (10000 tokens)."""
   base_llm_request.config.thinking_config = types.ThinkingConfig(
       include_thoughts=True, thinking_budget=-1
   )
@@ -76,10 +76,10 @@ async def test_thinking_budget_automatic(claude_llm, base_llm_request):
     ):
       responses.append(response)
 
-    # Verify thinking parameter was passed with 1024 tokens
+    # Verify thinking parameter was passed with 10000 tokens
     mock_client.messages.stream.assert_called_once()
     call_kwargs = mock_client.messages.stream.call_args.kwargs
-    assert call_kwargs["thinking"] == {"type": "enabled", "budget_tokens": 1024}
+    assert call_kwargs["thinking"] == {"type": "enabled", "budget_tokens": 10000}
 
 
 @pytest.mark.asyncio
