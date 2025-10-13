@@ -16,7 +16,7 @@ import unittest
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 
-from google.adk.apps.sliding_window_compactor import SlidingWindowCompactor
+from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
 from google.adk.events.event import Event
 from google.adk.events.event_actions import EventActions
 from google.adk.events.event_actions import EventCompaction
@@ -32,12 +32,12 @@ import pytest
 @pytest.mark.parametrize(
     'env_variables', ['GOOGLE_AI', 'VERTEX'], indirect=True
 )
-class TestSlidingWindowCompactor(unittest.IsolatedAsyncioTestCase):
+class TestLlmEventSummarizer(unittest.IsolatedAsyncioTestCase):
 
   def setUp(self):
     self.mock_llm = AsyncMock(spec=BaseLlm)
     self.mock_llm.model = 'test-model'
-    self.compactor = SlidingWindowCompactor(llm=self.mock_llm)
+    self.compactor = LlmEventSummarizer(llm=self.mock_llm)
 
   def _create_event(
       self, timestamp: float, text: str, author: str = 'user'
@@ -64,7 +64,7 @@ class TestSlidingWindowCompactor(unittest.IsolatedAsyncioTestCase):
 
     self.mock_llm.generate_content_async.return_value = async_gen()
 
-    compacted_event = await self.compactor.maybe_compact_events(events=events)
+    compacted_event = await self.compactor.maybe_summarize_events(events=events)
 
     self.assertIsNotNone(compacted_event)
     self.assertEqual(
@@ -101,11 +101,11 @@ class TestSlidingWindowCompactor(unittest.IsolatedAsyncioTestCase):
 
     self.mock_llm.generate_content_async.return_value = async_gen()
 
-    compacted_event = await self.compactor.maybe_compact_events(events=events)
+    compacted_event = await self.compactor.maybe_summarize_events(events=events)
     self.assertIsNone(compacted_event)
 
   async def test_maybe_compact_events_empty_input(self):
-    compacted_event = await self.compactor.maybe_compact_events(events=[])
+    compacted_event = await self.compactor.maybe_summarize_events(events=[])
     self.assertIsNone(compacted_event)
     self.mock_llm.generate_content_async.assert_not_called()
 
