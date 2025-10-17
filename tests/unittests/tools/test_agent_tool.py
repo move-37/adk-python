@@ -178,7 +178,8 @@ def test_update_state():
   assert runner.session.state['state_1'] == 'changed_value'
 
 
-def test_update_artifacts():
+@mark.asyncio
+async def test_update_artifacts():
   """The agent tool can read and write artifacts."""
 
   async def before_tool_agent(callback_context: CallbackContext):
@@ -219,12 +220,21 @@ def test_update_artifacts():
   runner = testing_utils.InMemoryRunner(root_agent)
   runner.run('test1')
 
-  artifacts_path = f'test_app/test_user/{runner.session_id}'
-  assert runner.runner.artifact_service.artifacts == {
-      f'{artifacts_path}/artifact_1': [Part.from_text(text='test')],
-      f'{artifacts_path}/artifact_2': [Part.from_text(text='test 2')],
-      f'{artifacts_path}/artifact_3': [Part.from_text(text='test 2 3')],
-  }
+  async def load_artifact(filename: str):
+    return await runner.runner.artifact_service.load_artifact(
+        app_name='test_app',
+        user_id='test_user',
+        session_id=runner.session_id,
+        filename=filename,
+    )
+
+  assert await runner.runner.artifact_service.list_artifact_keys(
+      app_name='test_app', user_id='test_user', session_id=runner.session_id
+  ) == ['artifact_1', 'artifact_2', 'artifact_3']
+
+  assert await load_artifact('artifact_1') == Part.from_text(text='test')
+  assert await load_artifact('artifact_2') == Part.from_text(text='test 2')
+  assert await load_artifact('artifact_3') == Part.from_text(text='test 2 3')
 
 
 @mark.parametrize(
@@ -236,7 +246,7 @@ def test_update_artifacts():
     ],
     indirect=True,
 )
-def test_custom_schema():
+def test_custom_schema(env_variables):
   class CustomInput(BaseModel):
     custom_input: str
 
@@ -289,7 +299,9 @@ def test_custom_schema():
     ],
     indirect=True,
 )
-def test_agent_tool_response_schema_no_output_schema_vertex_ai():
+def test_agent_tool_response_schema_no_output_schema_vertex_ai(
+    env_variables,
+):
   """Test AgentTool with no output schema has string response schema for VERTEX_AI."""
   tool_agent = Agent(
       name='tool_agent',
@@ -314,7 +326,9 @@ def test_agent_tool_response_schema_no_output_schema_vertex_ai():
     ],
     indirect=True,
 )
-def test_agent_tool_response_schema_with_output_schema_vertex_ai():
+def test_agent_tool_response_schema_with_output_schema_vertex_ai(
+    env_variables,
+):
   """Test AgentTool with output schema has object response schema for VERTEX_AI."""
 
   class CustomOutput(BaseModel):
@@ -342,7 +356,9 @@ def test_agent_tool_response_schema_with_output_schema_vertex_ai():
     ],
     indirect=True,
 )
-def test_agent_tool_response_schema_gemini_api():
+def test_agent_tool_response_schema_gemini_api(
+    env_variables,
+):
   """Test AgentTool with GEMINI_API variant has no response schema."""
 
   class CustomOutput(BaseModel):
@@ -369,7 +385,9 @@ def test_agent_tool_response_schema_gemini_api():
     ],
     indirect=True,
 )
-def test_agent_tool_response_schema_with_input_schema_vertex_ai():
+def test_agent_tool_response_schema_with_input_schema_vertex_ai(
+    env_variables,
+):
   """Test AgentTool with input and output schemas for VERTEX_AI."""
 
   class CustomInput(BaseModel):
@@ -403,7 +421,9 @@ def test_agent_tool_response_schema_with_input_schema_vertex_ai():
     ],
     indirect=True,
 )
-def test_agent_tool_response_schema_with_input_schema_no_output_vertex_ai():
+def test_agent_tool_response_schema_with_input_schema_no_output_vertex_ai(
+    env_variables,
+):
   """Test AgentTool with input schema but no output schema for VERTEX_AI."""
 
   class CustomInput(BaseModel):

@@ -293,8 +293,10 @@ async def test_function_declaration_to_tool_param(
 
 @pytest.mark.asyncio
 async def test_generate_content_async(
-    claude_llm, llm_request, generate_content_response, generate_llm_response
+    llm_request, generate_content_response, generate_llm_response
 ):
+  # Use max_tokens < 8192 to trigger non-streaming mode
+  claude_llm = Claude(model="claude-3-5-sonnet-v2@20241022", max_tokens=4096)
   with mock.patch.object(claude_llm, "_anthropic_client") as mock_client:
     with mock.patch.object(
         anthropic_llm,
