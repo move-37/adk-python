@@ -12,5 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# version: major.minor.patch
-__version__ = "1.17.0"
+from __future__ import annotations
+
+
+class AlreadyExistsError(Exception):
+  """Represents an error that occurs when an entity already exists."""
+
+  def __init__(self, message="The resource already exists."):
+    """Initializes the AlreadyExistsError exception.
+
+    Args:
+        message (str): An optional custom message to describe the error.
+    """
+    self.message = message
+    super().__init__(self.message)
